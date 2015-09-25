@@ -1,7 +1,7 @@
 EXE=drovebank.native droveshell.native
 
 all:
-	ocamlbuild $(EXE)
+	ocamlbuild -use-ocamlfind $(EXE)
 
 .PHONY: clean
 clean:

@@ -1,0 +1,5 @@
+PRJ drovebank
+SRC .
+PKG unix
+PKG ocplib-endian
+PKG containers.data

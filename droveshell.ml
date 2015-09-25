@@ -1,18 +1,4 @@
-module Operation = struct
-  type t = List | Deposit | Withdraw | Transfer
-  let of_string s = match String.lowercase s with
-    | "list" -> List
-    | "deposit" -> Deposit
-    | "withdraw" -> Withdraw
-    | "transfer" -> Transfer
-    | _ -> invalid_arg "of_string"
-
-  let to_string = function
-    | List -> "list"
-    | Deposit -> "deposit"
-    | Withdraw -> "withdraw"
-    | Transfer -> "transfer"
-end
+open Drovelib
 
 let () =
   let speclist = [] in
@@ -27,4 +13,3 @@ let () =
     | Operation.Transfer -> ()
   with _ ->
     Arg.usage speclist usage_msg
-
