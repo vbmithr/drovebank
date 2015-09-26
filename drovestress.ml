@@ -68,7 +68,8 @@ let () =
         exit 1
     | h::_ -> Unix.ADDR_UNIX ("/tmp/" ^ h) in
   let rec create_threads acc i =
-    if i > 0 then (Thread.create thread_fun (drovebank, i, !n, !init_cash))::acc
+    if i >= 0 then
+      create_threads ((Thread.create thread_fun (drovebank, i, !n, !init_cash))::acc) (pred i)
     else acc in
-  let ths = create_threads [] !n in
+  let ths = create_threads [] (!n - 1) in
   List.iter Thread.join ths
