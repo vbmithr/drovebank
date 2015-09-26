@@ -241,7 +241,9 @@ module Operation = struct
     flush oc;
     match input_char ic with
     | '\000' -> Result.return ()
-    | _ -> Result.fail ()
+    | '\001' -> Result.fail `Atomicity
+    | '\002' -> Result.fail `Consistency
+    | _ -> assert false
 
   let transfer ~id ~id' ~qty ic oc =
     let buf = Bytes.create 32 in
@@ -250,9 +252,13 @@ module Operation = struct
     output_char oc '\003';
     output oc buf 0 32;
     flush oc;
-    match input_char ic with
-    | '\000' -> Result.return ()
-    | _ -> Result.fail ()
+    let c1 = input_char ic in
+    let c2 = input_char ic in
+    match c1, c2 with
+    | '\000', '\000' -> Result.return ()
+    | '\001', _ -> Result.fail `Atomicity
+    | '\002', _ -> Result.fail `Consistency
+    | _ -> assert false
 
   let custom ~id ~qty ~tr ~op ~len ic oc =
     let buf = Bytes.create 16 in
@@ -265,5 +271,7 @@ module Operation = struct
     flush oc;
     match input_char ic with
     | '\000' -> Result.return ()
-    | _ -> Result.fail ()
+    | '\001' -> Result.fail `Atomicity
+    | '\002' -> Result.fail `Consistency
+    | _ -> assert false
 end
