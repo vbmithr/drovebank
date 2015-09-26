@@ -5,7 +5,7 @@ let thread_fun (drovebank, myid, number_peers, init_cash) =
   let cash_outstanding = ref init_cash in
   Unix.with_connection drovebank (fun ic oc ->
       while true do
-        Thread.yield ();
+        Thread.delay 0.1;
         match Random.int 3 with
         | 0 ->
             let qty = Random.int (succ !cash_outstanding) in
@@ -13,19 +13,19 @@ let thread_fun (drovebank, myid, number_peers, init_cash) =
                      ~op:`Deposit ~id:myid ~qty:Int64.(of_int qty) ic oc with
             | Result.Ok () ->
                 cash_outstanding := !cash_outstanding - qty;
-                Printf.printf "<%Ld>" myid
+                Printf.printf "<%Ld: %d>\n%!" myid !cash_outstanding
             | _ ->
-                Printf.printf "<|%Ld|>" myid
+                Printf.printf "<|%Ld: %d|>%!" myid !cash_outstanding
             )
         | 1 ->
             let qty = Random.int (succ (init_cash - !cash_outstanding)) in
             (match Operation.atomic
-                     ~op:`Withdraw ~id:myid ~qty:Int64.(of_int qty)  ic oc with
+                     ~op:`Withdraw ~id:myid ~qty:Int64.(of_int qty) ic oc with
             | Result.Ok () ->
                 cash_outstanding := !cash_outstanding + qty;
-                Printf.printf "{%Ld}" myid
+                Printf.printf "{%Ld: %d}\n%!" myid !cash_outstanding
             | _ ->
-                Printf.printf "{|%Ld|}" myid
+                Printf.printf "{|%Ld: %d|}\n%!" myid !cash_outstanding
             )
         | 2 ->
             let id' = Random.int number_peers in
@@ -35,9 +35,9 @@ let thread_fun (drovebank, myid, number_peers, init_cash) =
                      ~id':Int64.(of_int id')
                      ~qty:Int64.(of_int qty) ic oc with
             | Result.Ok () ->
-                Printf.printf "[%Ld]" myid
+                Printf.printf "[%Ld -> %d]\n%!" myid id'
             | _ ->
-                Printf.printf "[|%Ld|]" myid
+                Printf.printf "[|%Ld -> %d|]\n%!" myid id'
             )
         | _ -> assert false
       done

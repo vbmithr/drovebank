@@ -62,15 +62,26 @@ let srv_fun client_ic client_oc =
   let buf = Bytes.create 1024 in
   while true do
     let nb_read = input client_ic buf 0 1 in
-    Printf.eprintf "Read %d bytes.\n%!" nb_read;
     if nb_read <> 1 then raise End_of_file;
     match Char.code Bytes.(get buf 0) with
     | 0 ->
-        Printf.eprintf "<- LIST\n%!";
         DB.(with_db db (fun { db; _ } -> output_value client_oc db));
         flush client_oc
+    | 1 ->
+        let nb_read = input client_ic buf 0 8 in
+        if nb_read <> 8 then raise End_of_file;
+        let id = Bytes.BE.get_int64 buf 0 in
+        DB.(with_db db (fun { db; _ } ->
+            Bytes.BE.set_int64 buf 0 0L;
+            (try
+              let v = Int64.Map.find id db in
+              Bytes.BE.set_int64 buf 0 v;
+            with Not_found -> ());
+            output client_oc buf 0 8;
+            flush client_oc
+          ))
     | n ->
-        for i = 0 to n-1 do
+        for i = 0 to n-2 do
           let entry = Entry.input client_ic in
           let open DB in
           with_db db (fun ({ db; oc; prev_tr; _ } as t) ->
@@ -83,13 +94,13 @@ let srv_fun client_ic client_oc =
                  Printf.eprintf "DB <- DB :: %s\n" (Entry.show entry)
                 )
               else
-                (output_string client_oc "NOK\n";
+                (output_char client_oc '\001';
                  flush client_oc;
                  raise Exit
                 )
             );
         done;
-        output_string client_oc "OK\n";
+        output_char client_oc '\000';
         flush client_oc
   done
 

@@ -1,15 +1,5 @@
 open Drovelib
 
-let show ic oc =
-  output_char oc '\000';
-  flush oc;
-  let (db : int64 Int64.Map.t) = input_value ic in
-  if Int64.Map.is_empty db then
-    Printf.eprintf "<ledger empty>\n"
-  else
-    Int64.Map.iter (fun id qty ->
-        Printf.printf "%Ld: %Ld\n%!" id qty
-      ) db
 
 let () =
   let op = ref None in
@@ -46,7 +36,19 @@ let () =
     match !op with
     | None -> Arg.usage speclist usage_msg
     | Some `Show ->
-        Unix.with_connection drovebank show
+        Unix.with_connection drovebank (fun ic oc ->
+            (match Operation.dump ic oc with
+            | Result.Error () -> prerr_endline "NOK"
+            | Result.Ok db ->
+                if Int64.Map.is_empty db then
+                  Printf.eprintf "<ledger empty>\n"
+                else
+                  Int64.Map.iter (fun id qty ->
+                      Printf.printf "%Ld: %Ld\n%!" id qty
+                    ) db
+            )
+          )
+
     | Some `Deposit ->
         (match !anon_args with
          | [`Int64 qty; `Int64 id] ->

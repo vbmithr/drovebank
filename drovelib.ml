@@ -218,25 +218,39 @@ module Entry = struct
 end
 
 module Operation = struct
+  let dump ic oc =
+  output_char oc '\000';
+  flush oc;
+  try Result.return (input_value ic : int64 Int64.Map.t)
+  with _ -> Result.fail ()
+
+  let query ic oc id =
+    let buf = Bytes.create 8 in
+    Bytes.BE.set_int64 buf 0 id;
+    output_char oc '\001';
+    output oc buf 0 8;
+    flush oc;
+    input ic buf 0 8
+
   let atomic ~op ~id ~qty ic oc =
     let buf = Bytes.create 16 in
     Entry.write' ~id ~qty ~tr:`Atomic ~op buf 0;
-    output_char oc '\001';
+    output_char oc '\002';
     output oc buf 0 16;
     flush oc;
-    match input_line ic with
-    | "OK" -> Result.return ()
+    match input_char ic with
+    | '\000' -> Result.return ()
     | _ -> Result.fail ()
 
   let transfer ~id ~id' ~qty ic oc =
     let buf = Bytes.create 32 in
     Entry.write' ~id ~qty ~tr:`Begin ~op:`Withdraw buf 0;
     Entry.write' ~id:id' ~qty ~tr:`End ~op:`Deposit buf 16;
-    output_char oc '\002';
+    output_char oc '\003';
     output oc buf 0 32;
     flush oc;
-    match input_line ic with
-    | "OK" -> Result.return ()
+    match input_char ic with
+    | '\000' -> Result.return ()
     | _ -> Result.fail ()
 
   let custom ~id ~qty ~tr ~op ~len ic oc =
@@ -245,10 +259,10 @@ module Operation = struct
     let tr = Entry.transaction_of_string tr in
     let len = Int64.to_int len in
     Entry.write' ~id ~qty ~tr ~op buf 0;
-    output_char oc '\001';
+    output_char oc '\002';
     output oc buf 0 (min 16 len);
     flush oc;
-    match input_line ic with
-    | "OK" -> Result.return ()
+    match input_char ic with
+    | '\000' -> Result.return ()
     | _ -> Result.fail ()
 end
