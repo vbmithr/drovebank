@@ -11,34 +11,6 @@ let show ic oc =
         Printf.printf "%Ld: %Ld\n%!" id qty
       ) db
 
-let atomic ~op ~id ~qty ic oc =
-  let buf = Bytes.create 16 in
-  Entry.write' ~id ~qty ~tr:`Atomic ~op buf 0;
-  output_char oc '\001';
-  output oc buf 0 16;
-  flush oc;
-  prerr_endline (input_line ic)
-
-let transfer ~id ~id' ~qty ic oc =
-  let buf = Bytes.create 32 in
-  Entry.write' ~id ~qty ~tr:`Begin ~op:`Withdraw buf 0;
-  Entry.write' ~id:id' ~qty ~tr:`End ~op:`Deposit buf 16;
-  output_char oc '\002';
-  output oc buf 0 32;
-  flush oc;
-  prerr_endline (input_line ic)
-
-let custom ~id ~qty ~tr ~op ~len ic oc =
-  let buf = Bytes.create 16 in
-  let op = Entry.op_of_string op in
-  let tr = Entry.transaction_of_string tr in
-  let len = Int64.to_int len in
-  Entry.write' ~id ~qty ~tr ~op buf 0;
-  output_char oc '\001';
-  output oc buf 0 (min 16 len);
-  flush oc;
-  prerr_endline (input_line ic)
-
 let () =
   let op = ref None in
   let anon_args = ref [] in
@@ -78,25 +50,41 @@ let () =
     | Some `Deposit ->
         (match !anon_args with
          | [`Int64 qty; `Int64 id] ->
-             Unix.with_connection drovebank (atomic ~op:`Deposit ~id ~qty)
+             Unix.with_connection drovebank (fun ic oc ->
+                 match Operation.atomic ~op:`Deposit ~id ~qty ic oc with
+                 | Result.Ok () -> prerr_endline "OK"
+                 | _ -> prerr_endline "NOK"
+               )
          | _ -> raise Exit
         )
     | Some `Withdraw ->
         (match !anon_args with
          | [`Int64 qty; `Int64 id] ->
-             Unix.with_connection drovebank (atomic ~op:`Withdraw ~id ~qty)
+             Unix.with_connection drovebank (fun ic oc ->
+                 match Operation.atomic ~op:`Withdraw ~id ~qty ic oc with
+                 | Result.Ok () -> prerr_endline "OK"
+                 | _ -> prerr_endline "NOK"
+               )
          | _ -> raise Exit
         )
     | Some `Transfer ->
         (match !anon_args with
          | [`Int64 qty; `Int64 id'; `Int64 id] ->
-             Unix.with_connection drovebank (transfer ~id ~id' ~qty)
+             Unix.with_connection drovebank (fun ic oc ->
+                 match Operation.transfer ~id ~id' ~qty ic oc with
+                 | Result.Ok () -> prerr_endline "OK"
+                 | _ -> prerr_endline "NOK"
+               )
          | _ -> raise Exit
         )
     | Some `Custom ->
         (match !anon_args with
          | [`Int64 len; `String tr; `String op; `Int64 qty; `Int64 id] ->
-             Unix.with_connection drovebank (custom ~id ~qty ~op ~tr ~len)
+             Unix.with_connection drovebank (fun ic oc ->
+                 match Operation.custom ~id ~qty ~op ~tr ~len ic oc with
+                 | Result.Ok () -> prerr_endline "OK"
+                 | _ -> prerr_endline "NOK"
+               )
          | _ -> raise Exit
         )
   with exn ->

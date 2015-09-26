@@ -88,6 +88,13 @@ module Bytes = struct
   end
 end
 
+module Result = struct
+  type ('a, 'b) t = Ok of 'a | Error of 'b
+
+  let return v = Ok v
+  let fail v = Error v
+end
+
 module Entry = struct
   type transaction = [`Cont | `Begin | `End | `Atomic]
 
@@ -208,4 +215,40 @@ module Entry = struct
           then Int64.Map.add t.id Int64.(cur_qty - t.qty) db
           else db
         with Not_found -> db
+end
+
+module Operation = struct
+  let atomic ~op ~id ~qty ic oc =
+    let buf = Bytes.create 16 in
+    Entry.write' ~id ~qty ~tr:`Atomic ~op buf 0;
+    output_char oc '\001';
+    output oc buf 0 16;
+    flush oc;
+    match input_line ic with
+    | "OK" -> Result.return ()
+    | _ -> Result.fail ()
+
+  let transfer ~id ~id' ~qty ic oc =
+    let buf = Bytes.create 32 in
+    Entry.write' ~id ~qty ~tr:`Begin ~op:`Withdraw buf 0;
+    Entry.write' ~id:id' ~qty ~tr:`End ~op:`Deposit buf 16;
+    output_char oc '\002';
+    output oc buf 0 32;
+    flush oc;
+    match input_line ic with
+    | "OK" -> Result.return ()
+    | _ -> Result.fail ()
+
+  let custom ~id ~qty ~tr ~op ~len ic oc =
+    let buf = Bytes.create 16 in
+    let op = Entry.op_of_string op in
+    let tr = Entry.transaction_of_string tr in
+    let len = Int64.to_int len in
+    Entry.write' ~id ~qty ~tr ~op buf 0;
+    output_char oc '\001';
+    output oc buf 0 (min 16 len);
+    flush oc;
+    match input_line ic with
+    | "OK" -> Result.return ()
+    | _ -> Result.fail ()
 end
