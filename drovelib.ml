@@ -1,9 +1,34 @@
+let with_finalize ~f_final ~f =
+  try
+    let res = f () in
+    f_final ();
+    res
+  with exn ->
+    f_final ();
+    raise exn
+
+let with_ic ic f =
+  let f () = f ic in
+  let f_final () = close_in ic in
+  with_finalize ~f_final ~f
+
+let with_oc ic f =
+  let f () = f ic in
+  let f_final () = close_out ic in
+  with_finalize ~f_final ~f
+
 module Unix = struct
   include Unix
 
   let rec accept_non_intr s =
   try accept s
   with Unix_error (EINTR, _, _) -> accept_non_intr s
+
+  let with_connection saddr f =
+  let ic, oc = Unix.(open_connection saddr) in
+  with_finalize
+    ~f_final:(fun () -> close_in ic)
+    ~f:(fun () -> f ic oc)
 
   let establish_server server_fun sockaddr =
     let sock =
@@ -63,25 +88,6 @@ module Bytes = struct
   end
 end
 
-let with_finalize ~f_final ~f =
-  try
-    let res = f () in
-    f_final ();
-    res
-  with exn ->
-    f_final ();
-    raise exn
-
-let with_ic ic f =
-  let f () = f ic in
-  let f_final () = close_in ic in
-  with_finalize ~f_final ~f
-
-let with_oc ic f =
-  let f () = f ic in
-  let f_final () = close_out ic in
-  with_finalize ~f_final ~f
-
 module Entry = struct
   type transaction = [`Cont | `Begin | `End | `Atomic]
 
@@ -91,11 +97,23 @@ module Entry = struct
     | `End -> "E"
     | `Atomic -> "A"
 
+  let transaction_of_string = function
+    | "C" -> `Cont
+    | "B" -> `Begin
+    | "E" -> `End
+    | "A" -> `Atomic
+    | _ -> invalid_arg "transaction_of_string"
+
   type op = [`Deposit | `Withdraw]
 
   let string_of_op = function
     | `Deposit -> "D"
     | `Withdraw -> "W"
+
+  let op_of_string = function
+    | "D" -> `Deposit
+    | "W" -> `Withdraw
+    | _ -> invalid_arg "op_of_string"
 
   type t = {
     tr: transaction;

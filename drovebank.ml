@@ -33,13 +33,14 @@ let load_from_disk ic =
     done;
     assert false
   with
-  | End_of_file -> Some (!nb_records, !db)
+  | End_of_file -> Some (!nb_records, !prev_tr, !db)
   | exn -> None
 
 module DB = struct
   type t = {
     mutable db: int64 Int64.Map.t;
     mutable oc: out_channel;
+    mutable prev_tr: Entry.transaction;
     mutable in_use: bool;
     m: Mutex.t;
     c: Condition.t;
@@ -49,6 +50,7 @@ module DB = struct
     {
       db = Int64.Map.empty;
       oc = stdout;
+      prev_tr = `Atomic;
       in_use = false;
       m = Mutex.create ();
       c = Condition.create ();
@@ -60,10 +62,13 @@ module DB = struct
       Condition.wait c m
     done;
     t.in_use <- true;
-    t.db <- f oc db;
-    t.in_use <- false;
-    if in_use = false then Condition.signal c;
-    Mutex.unlock m
+    with_finalize
+      ~f:(fun () -> f t)
+      ~f_final:(fun () ->
+          t.in_use <- false;
+          if in_use = false then Condition.signal c;
+          Mutex.unlock m
+        )
 end
 
 let db = DB.create ()
@@ -77,28 +82,27 @@ let srv_fun client_ic client_oc =
     match Char.code Bytes.(get buf 0) with
     | 0 ->
         Printf.eprintf "<- LIST\n%!";
-        DB.with_db db (fun _ db -> output_value client_oc db; db);
+        DB.(with_db db (fun { db; _ } -> output_value client_oc db));
         flush client_oc
     | n ->
-        let open Entry in
-        let prev_tr = ref `Atomic in
         for i = 0 to n-1 do
-          let entry = input client_ic in
-          if is_acceptable !prev_tr entry.tr
-          then
-            (DB.with_db db (fun oc db ->
-                 output oc entry;
+          let entry = Entry.input client_ic in
+          let open DB in
+          with_db db (fun ({ db; oc; prev_tr; _ } as t) ->
+              if is_acceptable prev_tr entry.Entry.tr
+              then
+                (Entry.output oc entry;
                  flush oc;
-                 Entry.process db entry
-               );
-             prev_tr := entry.tr;
-             Printf.eprintf "DB <- DB :: %s\n" (Entry.show entry);
-            )
-          else
-            (output_string client_oc "NOK\n";
-             flush client_oc;
-             raise Exit
-            )
+                 t.db <- Entry.process db entry;
+                 t.prev_tr <- entry.Entry.tr;
+                 Printf.eprintf "DB <- DB :: %s\n" (Entry.show entry)
+                )
+              else
+                (output_string client_oc "NOK\n";
+                 flush client_oc;
+                 raise Exit
+                )
+            );
         done;
         output_string client_oc "OK\n";
         flush client_oc
@@ -130,8 +134,9 @@ let () =
   match with_ic (open_in_bin "drovebank.db") (fun ic -> load_from_disk ic) with
   | None ->
       (prerr_endline "Corrupted DB, aborting."; exit 1)
-  | Some (nb_records, db') ->
+  | Some (nb_records, prev_tr, db') ->
       db.DB.db <- db';
+      db.DB.prev_tr <- prev_tr;
       close_out (let oc = open_out_bin lockfile in output_string oc (string_of_int mypid); oc);
       Printf.printf "Successfully imported %d records from DB.\n%!" nb_records;
       Printf.printf "DroveBank server listening on %s\n%!" !mysock;
