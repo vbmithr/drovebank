@@ -37,6 +37,32 @@ module Int64 = struct
   module Map = Map.Make(Int64)
 end
 
+module Bytes = struct
+  include Bytes
+
+  external swap64 : int64 -> int64 = "%bswap_int64"
+  external set_64 : Bytes.t -> int -> int64 -> unit = "%caml_string_set64"
+  external get_64 : Bytes.t -> int -> int64 = "%caml_string_get64"
+
+  module BE = struct
+    let set_int64 buf pos i =
+      set_64 buf pos (if Sys.big_endian then i else swap64 i)
+    let get_int64 buf pos =
+      if Sys.big_endian
+      then get_64 buf pos
+      else swap64 (get_64 buf pos)
+  end
+
+  module LE = struct
+    let set_int64 buf pos i =
+      set_64 buf pos (if Sys.big_endian then swap64 i else i)
+    let get_int64 buf pos =
+      if Sys.big_endian
+      then swap64 (get_64 buf pos)
+      else get_64 buf pos
+  end
+end
+
 let with_finalize ~f_final ~f =
   try
     let res = f () in
@@ -116,8 +142,8 @@ module Entry = struct
         (shift_left t.id 3)
         (logor (int64_of_transaction t.tr) (int64_of_op t.op))
     in
-    EndianBytes.BigEndian.set_int64 buf pos b1;
-    EndianBytes.BigEndian.set_int64 buf (pos+8) t.qty
+    Bytes.BE.set_int64 buf pos b1;
+    Bytes.BE.set_int64 buf (pos+8) t.qty
 
   let write' ?(tr=`Atomic) ~op ~id ~qty buf pos =
     let b1 =
@@ -126,12 +152,12 @@ module Entry = struct
         (shift_left id 3)
         (logor (int64_of_transaction tr) (int64_of_op op))
     in
-    EndianBytes.BigEndian.set_int64 buf pos b1;
-    EndianBytes.BigEndian.set_int64 buf (pos+8) qty
+    Bytes.BE.set_int64 buf pos b1;
+    Bytes.BE.set_int64 buf (pos+8) qty
 
   let read buf pos =
-    let b1 = EndianBytes.BigEndian.get_int64 buf pos in
-    let qty = EndianBytes.BigEndian.get_int64 buf (pos+8) in
+    let b1 = Bytes.BE.get_int64 buf pos in
+    let qty = Bytes.BE.get_int64 buf (pos+8) in
     let id = Int64.shift_right_logical b1 3 in
     let tr = transaction_of_int64 Int64.(logand b1 3L) in
     let op = if Int64.(logand b1 4L) = 0L then `Deposit else `Withdraw in
