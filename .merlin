@@ -1,5 +1,6 @@
 PRJ drovebank
-SRC .
+S .
+B _build
 PKG unix
 PKG ocplib-endian
 PKG containers.data

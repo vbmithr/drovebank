@@ -1,78 +1,30 @@
 open Drovelib
 
-module Entry = struct
-  let int64_of_transaction = function
-    | `Begin -> 1L
-    | `End -> 2L
-    | `None -> 3L
 
-  let transaction_of_int64 = function
-    | 1L -> `Begin
-    | 2L -> `End
-    | 3L -> `None
-    | _ -> invalid_arg "transaction_of_int64"
-
-  let int64_of_op = function
-    | `Deposit -> 0L
-    | `Withdraw -> 4L
-
-  let write ~buf ~pos ~id ~qty ~transaction ~op =
-    let b1 =
-      let open Int64 in
-      logor
-        (shift_left id 3)
-        (logor (int64_of_transaction transaction) (int64_of_op op))
-    in
-    EndianBytes.BigEndian.set_int64 buf pos b1;
-    EndianBytes.BigEndian.set_int64 buf (pos+8) qty
-
-  let read buf pos =
-    let b1 = EndianBytes.BigEndian.get_int64 buf pos in
-    let qty = EndianBytes.BigEndian.get_int64 buf (pos+8) in
-    let id = Int64.shift_right_logical b1 3 in
-    let transaction = transaction_of_int64 Int64.(logand b1 3L) in
-    transaction, ((if Int64.(logand b1 4L) = 0L then `Deposit else `Withdraw), id, qty)
-
-  let process db = function
-    | `Deposit, id, qty ->
-        (try
-           Hashtbl.(replace db id Int64.((find db id) + qty))
-         with Not_found ->
-           Hashtbl.add db id qty)
-    | `Withdraw, id, qty ->
-        try
-          let cur_qty = Hashtbl.find db id in
-          if cur_qty >= qty
-          then Hashtbl.replace db id Int64.(cur_qty - qty)
-          else raise Exit
-        with Not_found ->
-          raise Exit
-end
-
-let consume_transaction ?db_oc db ic =
-  let buf = Bytes.create 16 in
-  let rec inner acc =
-    let nb_read = input ic buf 0 16 in
-    if nb_read <> 16 then raise End_of_file;
-    (match db_oc with
-    | None -> ()
-    | Some oc -> output oc buf 0 16
-    );
-    let transaction, entry = Entry.read buf 0 in
-    match transaction with
-    | `None ->
-        Entry.process db entry
-    | `Begin ->
-        inner (entry::acc);
-    | `End ->
-        List.(iter (Entry.process db) (rev (entry::acc)))
-  in inner []
+let is_acceptable prev cur = match prev, cur with
+   | `Atomic, `Atomic -> true
+   | `Atomic, `Begin -> true
+   | `Atomic, #Entry.transaction -> false
+   | `Begin, `Cont -> true
+   | `Begin, `End -> true
+   | `Begin, #Entry.transaction -> false
+   | `End, `Atomic -> true
+   | `End, `Begin -> true
+   | `End, #Entry.transaction -> false
+   | `Cont, `End -> true
+   | `Cont, `Cont -> true
+   | `Cont, #Entry.transaction -> false
 
 let load_from_disk ic =
-  let db = Hashtbl.create 13 in
+  let db = ref Int64.Map.empty in
+  let prev_tr = ref `Atomic in
   try
     while true do
-      consume_transaction db ic
+      let open Entry in
+      let entry = input ic in
+      if is_acceptable !prev_tr entry.tr then  db := Entry.process !db entry
+      else raise Exit;
+      prev_tr := entry.tr
     done;
     assert false
   with
@@ -80,8 +32,22 @@ let load_from_disk ic =
   | exn -> None
 
 let srv_fun db_oc db client_ic client_oc =
+  let buf = Bytes.create 1024 in
   while true do
-    consume_transaction ~db_oc db client_ic
+    let nb_read = input client_ic buf 0 1 in
+    if nb_read <> 1 then raise End_of_file;
+    match Char.code Bytes.(get buf 0) with
+    | 0 ->
+        output_value client_oc db
+    | n ->
+        let open Entry in
+        let prev_tr = ref `Atomic in
+        for i = 0 to n-1 do
+          let entry = input client_ic in
+          if is_acceptable !prev_tr entry.tr
+          then output db_oc entry
+          else raise Exit
+        done
   done
 
 let () =
