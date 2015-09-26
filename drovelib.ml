@@ -204,17 +204,18 @@ module Entry = struct
 
   let process db t = match t.op with
     | `Deposit ->
-        (try
-           Int64.(Map.add t.id (Map.find t.id db + t.qty) db)
-         with Not_found ->
-           Int64.Map.add t.id t.qty db)
+        Result.return
+          (try
+             Int64.(Map.add t.id (Map.find t.id db + t.qty) db)
+           with Not_found ->
+             Int64.Map.add t.id t.qty db)
     | `Withdraw ->
         try
           let cur_qty = Int64.Map.find t.id db in
           if cur_qty >= t.qty
-          then Int64.Map.add t.id Int64.(cur_qty - t.qty) db
-          else db
-        with Not_found -> db
+          then Result.return (Int64.Map.add t.id Int64.(cur_qty - t.qty) db)
+          else Result.fail ()
+        with Not_found -> Result.fail ()
 end
 
 module Operation = struct
