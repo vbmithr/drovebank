@@ -131,6 +131,8 @@ let () =
       exit 1
     );
   Sys.catch_break true;
+  let oc = open_out_gen
+      [Open_append; Open_creat; Open_binary] 0o600 "drovebank.db" in
   match with_ic (open_in_bin "drovebank.db") (fun ic -> load_from_disk ic) with
   | None ->
       (prerr_endline "Corrupted DB, aborting."; exit 1)
@@ -141,8 +143,6 @@ let () =
       Printf.printf "Successfully imported %d records from DB.\n%!" nb_records;
       Printf.printf "DroveBank server listening on %s\n%!" !mysock;
       try
-        let oc = open_out_gen
-            [Open_append; Open_creat; Open_binary] 0o600 "drovebank.db" in
         db.DB.oc <- oc;
         Unix.establish_server srv_fun Unix.(ADDR_UNIX !mysock)
       with Sys.Break ->
