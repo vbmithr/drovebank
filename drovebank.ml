@@ -83,30 +83,33 @@ let srv_fun client_ic client_oc =
             flush client_oc
           ))
     | n ->
-        for i = 0 to n-2 do
-          let entry = Entry.input client_ic in
-          let open DB in
-          with_db db (fun ({ db; oc; prev_tr; _ } as t) ->
-              let fail () =
-                output_char client_oc '\001';
+        let open DB in
+        with_db db (fun t ->
+            for i = 0 to n-2 do
+              let fail v =
+                let retchar = match v with
+                  | `Atomicity -> '\001'
+                  | `Consistency -> '\002' in
+                output_char client_oc retchar;
                 flush client_oc
               in
-              if not (is_acceptable prev_tr entry.Entry.tr)
-              then fail ()
+              let entry = Entry.input client_ic in
+              if not (is_acceptable t.prev_tr entry.Entry.tr)
+              then fail `Atomicity
               else
-                match Entry.process db entry with
-                | Result.Error () -> fail ()
+                match Entry.process t.db entry with
+                | Result.Error () -> fail `Consistency
                 | Result.Ok db' ->
-                    (Entry.output oc entry;
-                     flush oc;
+                    (Entry.output t.oc entry;
+                     flush t.oc;
                      t.db <- db';
                      t.prev_tr <- entry.Entry.tr;
                      Printf.eprintf "DB <- DB :: %s\n%!" (Entry.show entry);
                      output_char client_oc '\000';
                      flush client_oc
                     )
-            );
-        done;
+            done
+          );
   done
 
 let () =
