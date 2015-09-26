@@ -25,8 +25,10 @@ let load_from_disk ic =
       let entry = Entry.input ic in
       if !verbose then
         prerr_endline (Entry.show entry);
-      if is_acceptable !prev_tr entry.Entry.tr
-      then db := Entry.process !db entry
+      if is_acceptable !prev_tr entry.Entry.tr then
+        match Entry.process !db entry with
+        | Result.Error () -> raise Exit
+        | Result.Ok db' -> db := db'
       else raise Exit;
       prev_tr := entry.Entry.tr;
       incr nb_records
@@ -85,23 +87,26 @@ let srv_fun client_ic client_oc =
           let entry = Entry.input client_ic in
           let open DB in
           with_db db (fun ({ db; oc; prev_tr; _ } as t) ->
-              if is_acceptable prev_tr entry.Entry.tr
-              then
-                (Entry.output oc entry;
-                 flush oc;
-                 t.db <- Entry.process db entry;
-                 t.prev_tr <- entry.Entry.tr;
-                 Printf.eprintf "DB <- DB :: %s\n" (Entry.show entry)
-                )
+              let fail () =
+                output_char client_oc '\001';
+                flush client_oc
+              in
+              if not (is_acceptable prev_tr entry.Entry.tr)
+              then fail ()
               else
-                (output_char client_oc '\001';
-                 flush client_oc;
-                 raise Exit
-                )
+                match Entry.process db entry with
+                | Result.Error () -> fail ()
+                | Result.Ok db' ->
+                    (Entry.output oc entry;
+                     flush oc;
+                     t.db <- db';
+                     t.prev_tr <- entry.Entry.tr;
+                     Printf.eprintf "DB <- DB :: %s\n%!" (Entry.show entry);
+                     output_char client_oc '\000';
+                     flush client_oc
+                    )
             );
         done;
-        output_char client_oc '\000';
-        flush client_oc
   done
 
 let () =
