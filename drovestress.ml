@@ -3,46 +3,45 @@ open Drovelib
 let thread_fun (drovebank, myid, number_peers, init_cash) =
   let myid = Int64.of_int myid in
   let cash_outstanding = ref init_cash in
-  while true do
-    match Random.int 3 with
-    | 0 ->
-        let qty = Random.int (succ !cash_outstanding) in
-        Unix.with_connection drovebank (fun ic oc ->
-            match Operation.atomic
-                    ~op:`Deposit ~id:myid ~qty:Int64.(of_int qty) ic oc with
+  Unix.with_connection drovebank (fun ic oc ->
+      while true do
+        Thread.yield ();
+        match Random.int 3 with
+        | 0 ->
+            let qty = Random.int (succ !cash_outstanding) in
+            (match Operation.atomic
+                     ~op:`Deposit ~id:myid ~qty:Int64.(of_int qty) ic oc with
             | Result.Ok () ->
                 cash_outstanding := !cash_outstanding - qty;
-                Printf.printf "%Ld + OK " myid
+                Printf.printf "<%Ld>" myid
             | _ ->
-                Printf.printf "%Ld + NOK " myid
-          )
-    | 1 ->
-        let qty = Random.int (succ (init_cash - !cash_outstanding)) in
-        Unix.with_connection drovebank (fun ic oc ->
-            match Operation.atomic
-                    ~op:`Withdraw ~id:myid ~qty:Int64.(of_int qty)  ic oc with
+                Printf.printf "<|%Ld|>" myid
+            )
+        | 1 ->
+            let qty = Random.int (succ (init_cash - !cash_outstanding)) in
+            (match Operation.atomic
+                     ~op:`Withdraw ~id:myid ~qty:Int64.(of_int qty)  ic oc with
             | Result.Ok () ->
                 cash_outstanding := !cash_outstanding + qty;
-                Printf.printf "%Ld - OK" myid
+                Printf.printf "{%Ld}" myid
             | _ ->
-                Printf.printf "%Ld - NOK" myid
-          )
-    | 2 ->
-        let id' = Random.int number_peers in
-        let qty = 1 in
-        Unix.with_connection drovebank (fun ic oc ->
-            match Operation.transfer
-                    ~id:myid
-                    ~id':Int64.(of_int id')
-                    ~qty:Int64.(of_int qty) ic oc with
+                Printf.printf "{|%Ld|}" myid
+            )
+        | 2 ->
+            let id' = Random.int number_peers in
+            let qty = 1 in
+            (match Operation.transfer
+                     ~id:myid
+                     ~id':Int64.(of_int id')
+                     ~qty:Int64.(of_int qty) ic oc with
             | Result.Ok () ->
-                Printf.printf "%Ld <> OK" myid
+                Printf.printf "[%Ld]" myid
             | _ ->
-                Printf.printf "%Ld <> NOK" myid
-          )
-    | _ -> assert false
-  done
-
+                Printf.printf "[|%Ld|]" myid
+            )
+        | _ -> assert false
+      done
+    )
 
 let () =
   let n = ref 10 in
