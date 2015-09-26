@@ -1,11 +1,26 @@
 open Drovelib
 
+let mk_bank () =
+  let bank : (int64, int) Hashtbl.t = Hashtbl.create 13 in
+  let m = Mutex.create () in
+  fun f ->
+    with_finalize
+      ~f_final:(fun () -> Mutex.unlock m)
+      ~f:(fun () -> Mutex.lock m; f bank)
+
+let with_bank = mk_bank ()
+
 let thread_fun (drovebank, myid, number_peers, init_cash) =
   let myid = Int64.of_int myid in
   let cash_outstanding = ref init_cash in
   Unix.with_connection drovebank (fun ic oc ->
       while true do
         Thread.delay 0.1;
+        if myid = 0L then
+          with_bank (fun ht ->
+              Hashtbl.iter (fun a b -> Printf.printf "%Ld -> %d %!" a b) ht;
+              print_endline ""
+            );
         match Random.int 3 with
         | 0 ->
             let qty = Random.int (succ !cash_outstanding) in
@@ -13,9 +28,15 @@ let thread_fun (drovebank, myid, number_peers, init_cash) =
                      ~op:`Deposit ~id:myid ~qty:Int64.(of_int qty) ic oc with
             | Result.Ok () ->
                 cash_outstanding := !cash_outstanding - qty;
-                Printf.printf "<%Ld: %d>\n%!" myid !cash_outstanding
-            | _ ->
-                Printf.printf "<|%Ld: %d|>%!" myid !cash_outstanding
+                with_bank (fun ht ->
+                    (try Hashtbl.(replace ht myid ((find ht myid) + qty))
+                     with Not_found -> Hashtbl.add ht myid qty)
+                  );
+                Printf.printf "%Ld D %d outstanding %d\n%!" myid qty !cash_outstanding
+            | Result.Error v ->
+                let errortype = match v with `Atomicity -> "!" | `Consistency -> "!!" in
+                Printf.printf "%s%Ld D %d outstanding %d\n%!"
+                  errortype myid qty !cash_outstanding
             )
         | 1 ->
             let qty = Random.int (succ (init_cash - !cash_outstanding)) in
@@ -23,22 +44,37 @@ let thread_fun (drovebank, myid, number_peers, init_cash) =
                      ~op:`Withdraw ~id:myid ~qty:Int64.(of_int qty) ic oc with
             | Result.Ok () ->
                 cash_outstanding := !cash_outstanding + qty;
-                Printf.printf "{%Ld: %d}\n%!" myid !cash_outstanding
-            | _ ->
-                Printf.printf "{|%Ld: %d|}\n%!" myid !cash_outstanding
+                with_bank (fun ht ->
+                    Hashtbl.(replace ht myid ((find ht myid) - qty))
+                  );
+                Printf.printf "%Ld W %d outstanding %d\n%!" myid qty !cash_outstanding
+            | Result.Error v ->
+                let errortype = match v with `Atomicity -> "!" | `Consistency -> "!!" in
+                Printf.printf "%s%Ld W %d outstanding %d\n%!"
+                  errortype myid qty !cash_outstanding
             )
         | 2 ->
-            let id' = Random.int number_peers in
-            let qty = 1 in
-            (match Operation.transfer
-                     ~id:myid
-                     ~id':Int64.(of_int id')
-                     ~qty:Int64.(of_int qty) ic oc with
-            | Result.Ok () ->
-                Printf.printf "[%Ld -> %d]\n%!" myid id'
-            | _ ->
-                Printf.printf "[|%Ld -> %d|]\n%!" myid id'
-            )
+            let id' = Random.int number_peers |> Int64.of_int in
+            if myid <> id' then
+              with_bank (fun ht ->
+                  let my_balance =
+                    try Hashtbl.find ht myid with Not_found -> 0 in
+                  let peer_balance =
+                    try Hashtbl.find ht id' with Not_found -> 0 in
+                  let qty = try Random.int my_balance with _ -> 0 in
+                  (match Operation.transfer
+                           ~id:myid
+                           ~id'
+                           ~qty:Int64.(of_int qty) ic oc with
+                  | Result.Ok () ->
+                      Hashtbl.replace ht myid (my_balance - qty);
+                      Hashtbl.replace ht id' (peer_balance + qty);
+                      Printf.printf "%Ld T %Ld %d\n%!" myid id' qty
+                  | Result.Error v ->
+                      let errortype = match v with `Atomicity -> "!" | `Consistency -> "!!" in
+                      Printf.printf "%s%Ld T %Ld %d\n%!" errortype myid id' qty
+                  )
+                )
         | _ -> assert false
       done
     )
