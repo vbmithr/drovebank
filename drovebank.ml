@@ -41,9 +41,7 @@ module DB = struct
     mutable db: int64 Int64.Map.t;
     mutable oc: out_channel;
     mutable prev_tr: Entry.transaction;
-    mutable in_use: bool;
     m: Mutex.t;
-    c: Condition.t;
   }
 
   let create () =
@@ -51,24 +49,11 @@ module DB = struct
       db = Int64.Map.empty;
       oc = stdout;
       prev_tr = `Atomic;
-      in_use = false;
       m = Mutex.create ();
-      c = Condition.create ();
     }
 
-  let with_db ({ db; oc; in_use; m; c } as t) f =
-    Mutex.lock m;
-    while in_use = true do
-      Condition.wait c m
-    done;
-    t.in_use <- true;
-    with_finalize
-      ~f:(fun () -> f t)
-      ~f_final:(fun () ->
-          t.in_use <- false;
-          if in_use = false then Condition.signal c;
-          Mutex.unlock m
-        )
+  let with_db ({ db; oc; m } as t) f =
+    with_finalize ~f:(fun () -> Mutex.lock m; f t) ~f_final:(fun () -> Mutex.unlock m)
 end
 
 let db = DB.create ()
