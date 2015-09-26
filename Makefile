@@ -1,4 +1,4 @@
-EXE=drovebank.native droveshell.native
+EXE=drovebank.native droveshell.native drovestress.native
 
 all:
 	ocamlbuild $(EXE)
