@@ -6,3 +6,6 @@ all:
 .PHONY: clean
 clean:
 	ocamlbuild -clean
+
+clean_db:
+	rm -f *.db *.LOCK
