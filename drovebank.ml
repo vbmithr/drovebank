@@ -113,12 +113,16 @@ let srv_fun client_ic client_oc =
   done
 
 let () =
+  let fresh = ref false in
+  let force = ref false in
   let mypid = Unix.getpid () in
   let mysock = ref Filename.(concat
                                "/tmp"
                                ("drovebank-" ^ string_of_int mypid ^ ".sock")) in
   let mydb = ref "drovebank.db" in
   let speclist = Arg.[
+      "-fresh", Set fresh, " Start with a fresh DB (default: false)";
+      "-force", Set force, " Overwrite the DB file if already exists (default: false)";
       "-v", Set verbose, " Be verbose (default: false)";
       "-sock", Set_string mysock,
       "<string> UNIX socket to listen on (default: /tmp/drovebank-<PID>.sock)";
@@ -129,14 +133,15 @@ let () =
     Printf.sprintf "Usage: %s <options>\nOptions are:" Sys.argv.(0) in
   Arg.parse speclist ignore usage_msg;
   let lockfile = Filename.(chop_extension !mydb) ^ ".LOCK" in
-  if Sys.file_exists lockfile then
+  if not !force && Sys.file_exists lockfile then
     (
       Printf.eprintf "DB %s already used by another process, exiting.\n" !mydb;
       exit 1
     );
   Sys.catch_break true;
   let oc = open_out_gen
-      [Open_append; Open_creat; Open_binary] 0o600 "drovebank.db" in
+      ((if !fresh then [Open_trunc] else []) @
+       [Open_append; Open_creat; Open_binary]) 0o600 "drovebank.db" in
   match with_ic (open_in_bin "drovebank.db") (fun ic -> load_from_disk ic) with
   | None ->
       (prerr_endline "Corrupted DB, aborting."; exit 1)
