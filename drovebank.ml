@@ -22,7 +22,7 @@ let load_from_disk ic =
   let nb_records = ref 0 in
   try
     while true do
-      let entry = Entry.input ic in
+      let entry = try Entry.input ic with End_of_file -> raise Exit in
       if !verbose then
         prerr_endline (Entry.show entry);
       if is_acceptable !prev_tr entry.Entry.tr then
