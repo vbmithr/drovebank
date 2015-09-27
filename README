@@ -1,0 +1,184 @@
+DroveBank
+=========
+
+# Description of the software
+
+I chose OCaml as the implementation language. Though a functional
+language, my implementation is mainly imperative (lots of loops,
+global state, etc).
+
+My solution comprise four files:
+
+* drovelib.ml: Some extensions to the OCaml stdlib, and shared types
+  and functions between executables.
+
+* drovebank.ml: A daemon that manages the ledger and serves it to
+  clients using POSIX sockets.
+
+* droveshell.ml: A simple client to DroveBank supporting
+  deposit/withdraw/transfer operations.
+
+* drovestress.ml: A simulation simulating n piggies continuously
+  performing random operations on DroveBank.
+
+# Compilation
+
+Use `make`. You need OCaml version 4.01.0 or greater. I could easily
+support older versions of OCaml if you need it, don't hesitate to ask
+me if it is the case.
+
+# General overview of the solution
+
+The problem is about designing a bank accounting system that is at
+least resilient to power failure.
+
+I decided to reduce this problem to the problem of implementing an
+ACID key-value store from integers to integers.
+
+It means that the account ids are represented by an integer, and the
+associated cash is also represented by an integer.
+
+I will explain why my this implementation follows the ACID
+requirements:
+
+* Atomic banking operations
+* Consistency of the ledger
+* Isolated concurrent client queries
+* Durability of ledger data
+
+This is basically what I can promise to piggies, that their money is
+stored in an ACID key-value store.
+
+# (more) Technical description
+
+I use write-ahead logging for ensuring resilience to power failure,
+and transactions in order to implement the transfer operation.
+
+The ledger is stored in a file (by default, `drovebank.db`). Only one
+process can access this file simultaneously, in practice this is
+ensured by a `drovebank.LOCK` file which existence is checked by the
+drovebank deamon.
+
+The ledger is represented by a sequence of 16 bytes blocks, each
+representing either a deposit or a withdrawal.
+
+Each block encodes the following data:
+* account id of the initiator: 61 bits
+* type of op (Deposit or Withdrawal): 1 bit
+* transaction infos (Atomic, Begin, End, Continuation): 2 bits
+* quantity of cash involved in the operation: 64 bits
+
+During boot, the drovebank daemon sequentially reads the ledger and
+constructs a hashtable associating accounts ids to cash balance while
+checking the consistency of each operation. This can fail for
+atomicity reasons (a new transaction starts before the previous one
+finishes), or consistency reasons (a withdrawal from an empty account
+or an account that has insufficient funds in it).
+
+Then the drovebank daemon listens for clients on its UNIX socket, and
+perform requested operations. On each operation, consistency is
+checked, and then written to the ledger if valid, or rejected if
+invalid. The client is notified of the success or failure of the
+operation.
+
+The drovebank daemon uses one POSIX thread per client served, and the
+state is protected by mutexes. Nowadays there are much more efficient
+ways handle client connections (based on the select/poll/epoll
+syscalls), that do not require POSIX threads at all. Unfortunately
+this is not bundled into the OCaml stdlib, and thus would have broken
+your requirements (and add a ton of "third party" code into the
+project :-))
+
+# ACID
+
+## Atomic banking operations
+
+The basic requested operations where `open account`, `deposit`,
+`withdraw`, `transfer`.
+
+In my solution, there is no explicit account creation, accounts are
+implicitely created when cash is deposited into an account number for
+the first time.
+
+Deposit and Withdraw operations are instrinsically atomic, and are
+represented by atomic blocks in the legder.
+
+Transfer is a withdrawal followed by a deposit in a transaction (first
+block has Begin flag, last block has End flag).
+
+The rules to check atomicity consistency are in `drovebank.ml line 5`,
+function `is_acceptable`. It describe the invariant that must hold
+between two sequencial blocks, and is pretty self-explanatory.
+
+## Consistency of the ledger
+
+The consistency is checked at boot time, and each time an operation is
+received by the client. If a violation of state is detected at boot
+time, the daemon stops and notify about the problem.
+
+The daemon notify a corruption of the ledger iff:
+
+- The size of the ledger is not a multiple of 16
+- There is a violation of atomicity (function `is_acceptable`)
+- There is a violation of consistency (withdrawal from an empty or
+  insufficiently funded account).
+
+## Isolated queries
+
+Multiple “concurrent” access is permitted by the drovebank daemon, but
+access to the ledger is a critical section and is protected by a
+mutex, thus operations are processed sequentially. It is possible to
+improve on this, for example, read access can be processed in
+parallel, as well as operations that do not operate on the same
+account ids.
+
+## Durability of data
+
+Durability is ensured by write-ahead logging. The whole ledger is
+represented by a sequence of blocks on disk, and a block is only
+written when consistency has been checked beforehand. This is
+resilient to power failure where partial blocks / partial transactions
+are written.
+
+# Bonus points
+
+As it stands, the solution does not validate the bonus points at all.
+
+Scalability is limited by the use of POSIX threads, the only
+concurrency primitives available in the OCaml stdlib. What's worse, as
+it stands, the OCaml running system only runs one thread
+simlutaneously due to the garbage collector's global lock. Efforts are
+currently made by the OCaml community to get rid of this limitation
+[1].
+
+Resilience to hardware loss could be achieved either by writing
+multiple versions of the ledger in different hard disks (not done, but
+easy to implement), or using a distributed key-value store (see
+below).
+
+To be really scalable, what is needed is a real consistent distributed
+key-value store, implemented using algorithms such as PAXOS[2] or
+RAFT[3], but this is vastly out of scope for an 8 hours project (at
+least for me).
+
+# TODO
+
+If this was a real project, I would also do:
+
+- Fix issues marked with `FIXME` in the code.
+
+- Remove the use of POSIX threads completely, and instead rely on a
+  select/poll/epoll based mechanism (and specifically a monadic
+  concurrency library such as Lwt or Async).
+
+- Improve the granularity of critical sections (as it stands now all
+  operation are processed sequentially although some of them could be
+  safely processed in parallel). Note that this issue disappears when
+  one does not use POSIX threads at all.
+
+- Quantitative performance evaluation of the efficiency of the program
+  (such as measuring the max number of operations per second).
+
+[1]: https://github.com/ocamllabs/compiler-hacking/wiki/Multicore-OCaml
+[2]: https://en.wikipedia.org/wiki/Paxos_(computer_science
+[3]: https://raft.github.io/
