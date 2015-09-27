@@ -22,28 +22,32 @@ let load_from_disk ic =
   let nb_records = ref 0 in
   try
     while true do
-      let entry = try Entry.input ic with End_of_file -> raise Exit in
-      if !verbose then
-        prerr_endline (Entry.show entry);
-      if is_acceptable !prev_tr entry.Entry.tr then
-        match Entry.process !db entry with
-        | Result.Error () -> raise Exit
-        | Result.Ok db' -> db := db'
-      else raise Exit;
-      prev_tr := entry.Entry.tr;
-      incr nb_records
+      match Entry.input ic with
+      | Result.Error End_of_file -> raise End_of_file
+      | Result.Error _ -> raise Exit
+      | Result.Ok entry ->
+          if !verbose then
+            prerr_endline (Entry.show entry);
+          if is_acceptable !prev_tr entry.Entry.tr then
+            match Entry.process !db entry with
+            | Result.Error () -> raise Exit
+            | Result.Ok db' -> db := db'
+          else raise Exit;
+          prev_tr := entry.Entry.tr;
+          incr nb_records
     done;
     assert false
   with
   | End_of_file -> Some (!nb_records, !prev_tr, !db)
   | exn -> None
 
+(* Module implementing the global live database*)
 module DB = struct
   type t = {
-    mutable db: int64 Int64.Map.t;
-    mutable oc: out_channel;
-    mutable prev_tr: Entry.transaction;
-    m: Mutex.t;
+    mutable db: int64 Int64.Map.t; (* the type of the live database *)
+    mutable oc: out_channel; (* the channel to append entries to the ledger on disk. *)
+    mutable prev_tr: Entry.transaction; (* the kind of the previous transaction. *)
+    m: Mutex.t; (* the lock to serialize access to the DB. *)
   }
 
   let create () =
@@ -97,25 +101,29 @@ let srv_fun client_ic client_oc =
                  transaction and stopping here without disconnecting
                  could block the whole server! This could be fixed by
                  adding timeouts here. *)
-              let entry = Entry.input client_ic in
-              if not (is_acceptable t.prev_tr entry.Entry.tr)
-              then fail `Atomicity
-              else
-                match Entry.process t.db entry with
-                | Result.Error () -> fail `Consistency
-                | Result.Ok db' ->
-                    (Entry.output t.oc entry;
-                     flush t.oc;
-                     t.db <- db';
-                     t.prev_tr <- entry.Entry.tr;
-                     Printf.eprintf "DB <- DB :: %s\n%!" (Entry.show entry);
-                     output_char client_oc '\000';
-                     flush client_oc
-                    )
+              match Entry.input client_ic with
+              | Result.Error End_of_file -> raise End_of_file
+              | Result.Error _ -> raise Exit
+              | Result.Ok entry ->
+                  if not (is_acceptable t.prev_tr entry.Entry.tr)
+                  then fail `Atomicity
+                  else
+                    match Entry.process t.db entry with
+                    | Result.Error () -> fail `Consistency
+                    | Result.Ok db' ->
+                        (Entry.output t.oc entry;
+                         flush t.oc;
+                         t.db <- db';
+                         t.prev_tr <- entry.Entry.tr;
+                         Printf.eprintf "DB <- DB :: %s\n%!" (Entry.show entry);
+                         output_char client_oc '\000';
+                         flush client_oc
+                        )
             done
           );
   done
 
+(* Entry point to the program, mostly boilerplate code. *)
 let () =
   let fresh = ref false in
   let force = ref false in

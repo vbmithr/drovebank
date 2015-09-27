@@ -192,8 +192,9 @@ module Entry = struct
     let buf = Bytes.create 16 in
     let rec inner pos len =
       let nb_read = input ic buf pos len in
-      if nb_read = len then read buf 0
-      else if nb_read = 0 then raise End_of_file
+      if nb_read = len then Result.return (read buf 0)
+      else if nb_read = 0 && len = 16 then Result.(fail End_of_file)
+      else if nb_read = 0 then Result.(fail Exit)
       else inner (pos+nb_read) (len-nb_read)
     in inner 0 16
 
