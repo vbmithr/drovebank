@@ -27,6 +27,15 @@ Use `make`. You need OCaml version 4.01.0 or greater. I could easily
 support older versions of OCaml if you need it, don't hesitate to ask
 me if it is the case.
 
+If all goes well, you will end up with three symlinks to native
+executables in the projects directory:
+
+* drovebank.native: the daemon
+* droveshell.native: the simple client
+* drovestress.native: the simulation
+
+All executables are self-documented: use <exec_name> --help as usual.
+
 # General overview of the solution
 
 The problem is about designing a bank accounting system that is at
@@ -115,6 +124,8 @@ between two sequencial blocks, and is pretty self-explanatory.
 The consistency is checked at boot time, and each time an operation is
 received by the client. If a violation of state is detected at boot
 time, the daemon stops and notify about the problem.
+
+The function checking consistency is in `drovelib.ml line 217`.
 
 The daemon notify a corruption of the ledger iff:
 

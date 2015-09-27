@@ -1,3 +1,8 @@
+(* The OCaml stdlib is notoriously incomplete. Below is code that
+   should belong to it. *)
+
+(* BEGIN STDLIB-LIKE CODE *)
+
 let with_finalize ~f_final ~f =
   try
     let res = f () in
@@ -95,8 +100,12 @@ module Result = struct
   let fail v = Error v
 end
 
+(* END STDLIB-LIKE CODE *)
+
+(* This module implement entries in the ledger. *)
 module Entry = struct
   type transaction = [`Cont | `Begin | `End | `Atomic]
+  (** Type of transaction. *)
 
   let string_of_transaction = function
     | `Cont -> "C"
@@ -112,6 +121,7 @@ module Entry = struct
     | _ -> invalid_arg "transaction_of_string"
 
   type op = [`Deposit | `Withdraw]
+  (** Type of operation. *)
 
   let string_of_op = function
     | `Deposit -> "D"
@@ -128,6 +138,7 @@ module Entry = struct
     id: int64;
     qty: int64
   }
+  (** Type of entries. *)
 
   let pp fmt t =
     Format.fprintf fmt "{ tr=%s; op=%s; id=%Ld; qty=%Ld; }"
@@ -203,6 +214,9 @@ module Entry = struct
     write buf 0 t;
     output oc buf 0 16
 
+  (** [process db t] updates [db], the live key-value store
+      represented by an int64 -> int64 map, with entry [t]. It either
+      updates the map or fail if there is a consistency violation. *)
   let process db t = match t.op with
     | `Deposit ->
         Result.return
@@ -219,6 +233,9 @@ module Entry = struct
         with Not_found -> Result.fail ()
 end
 
+(* This module implements the client code to query the `drovebank`
+   daemon. It lives here in order to be reused by both the
+   `droveshell` and `drovestress` executables. *)
 module Operation = struct
   let dump ic oc =
   output_char oc '\000';

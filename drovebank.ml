@@ -2,6 +2,9 @@ open Drovelib
 
 let verbose = ref false
 
+(* This is where the atomicity checks are performed. It defines what
+   is a valid sequence of two operations. #Entry.transaction means
+   "any variant that belongs to the type Entry.transaction". *)
 let is_acceptable prev cur = match prev, cur with
    | `Atomic, `Atomic -> true
    | `Atomic, `Begin -> true
@@ -58,12 +61,17 @@ module DB = struct
       m = Mutex.create ();
     }
 
+  (* All accesses to the DB are done using this function that
+     handles locking/unlocking the lock. *)
   let with_db ({ db; oc; m } as t) f =
     with_finalize ~f:(fun () -> Mutex.lock m; f t) ~f_final:(fun () -> Mutex.unlock m)
 end
 
+(* The global database is created here. It is a global variable, and
+   access to it is only done using the DB.with_db function. *)
 let db = DB.create ()
 
+(* This code is run in a separate POSIX thread for each client. *)
 let srv_fun client_ic client_oc =
   let buf = Bytes.create 1024 in
   while true do

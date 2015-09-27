@@ -1,5 +1,10 @@
 open Drovelib
 
+(* This code creates a closure that is used to locally keep track of
+   drovebank balances. It returns a function taking a function as an
+   argument, that will be applied on the hashtable, the operation
+   being protected by a mutex. This is typically the "memoize" pattern
+   used in functional programming. *)
 let mk_bank () =
   let bank : (int64, int) Hashtbl.t = Hashtbl.create 13 in
   let m = Mutex.create () in
@@ -8,8 +13,17 @@ let mk_bank () =
       ~f_final:(fun () -> Mutex.unlock m)
       ~f:(fun () -> Mutex.lock m; f bank)
 
+(* with_bank is a function that takes a function as parameter. It
+   stores the hashtable and the mutex in its closure. This way, the
+   only way to access this data is to call `with_bank` with the
+   function that perform the data access. *)
 let with_bank = mk_bank ()
 
+(* Each trade simulating a piggy will call this code. Each piggy
+   starts with the same amount of cash, `init_cash` and repeatedly
+   perform either a deposit, withdraw, or transfer with a 1/3
+   probability. The quantities of cash operated on are randomly chosed
+   between zero and the amount of cash available. *)
 let thread_fun (drovebank, myid, number_peers, init_cash) =
   let myid = Int64.of_int myid in
   let cash_outstanding = ref init_cash in
