@@ -93,6 +93,10 @@ let srv_fun client_ic client_oc =
                 output_char client_oc retchar;
                 flush client_oc
               in
+              (* FIXME: A client sending a part of a multiblock
+                 transaction and stopping here without disconnecting
+                 could block the whole server! This could be fixed by
+                 adding timeouts here. *)
               let entry = Entry.input client_ic in
               if not (is_acceptable t.prev_tr entry.Entry.tr)
               then fail `Atomicity
