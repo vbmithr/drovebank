@@ -107,7 +107,8 @@ The basic requested operations where `open account`, `deposit`,
 
 In my solution, there is no explicit account creation, accounts are
 implicitely created when cash is deposited into an account number for
-the first time.
+the first time: it is at this time that the entry in the hashtable is
+created.
 
 Deposit and Withdraw operations are instrinsically atomic, and are
 represented by atomic blocks in the legder.
